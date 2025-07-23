@@ -1,0 +1,28 @@
+# IDE
+.idea/
+*.iml
+
+# Compiled class files
+*.class
+
+# Maven
+target/
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Local settings
+.env
+*.local
+*.secret
+
+# Spring config
+src/main/resources/application.properties
+
+# Python cache
+__pycache__/
+*.pyc
