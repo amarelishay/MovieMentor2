@@ -1,51 +1,24 @@
 package movieMentor.config;
 
-import org.springframework.core.annotation.Order;
-import org.springframework.stereotype.Component;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.web.servlet.config.annotation.CorsRegistry;
+import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
-import javax.servlet.*;
-import javax.servlet.http.HttpServletRequest;
-import javax.servlet.http.HttpServletResponse;
-import java.io.IOException;
-import java.util.logging.Filter;
-import java.util.logging.LogRecord;
+@Configuration
+public class CORSFilter {
 
-@Component
-@Order(1)
-public class CORSFilter implements Filter {
-
-    public CORSFilter() {
-    }
-
-    public void destroy() {
-    }
-
-    public void doFilter(ServletRequest servletRequest, ServletResponse servletResponse, FilterChain chain)
-            throws IOException, ServletException {
-
-        HttpServletRequest request = (HttpServletRequest) servletRequest;
-
-        // Authorize (allow) all domains to consume the content
-        ((HttpServletResponse) servletResponse).addHeader("Access-Control-Allow-Origin","http://localhost:3000");
-        ((HttpServletResponse) servletResponse).addHeader("Access-Control-Allow-Methods","GET, OPTIONS, HEAD, PUT, POST, DELETE");
-        ((HttpServletResponse) servletResponse).addHeader("Access-Control-Allow-Headers","authorization, Origin, Accept, x-auth-token, Content-Type, Access-Control-Request-Method, Access-Control-Request-Headers");
-
-        HttpServletResponse resp = (HttpServletResponse) servletResponse;
-
-        // For HTTP OPTIONS verb/method reply with ACCEPTED status code -- per CORS handshake
-        if (request.getMethod().equals("OPTIONS")) {
-            return;
-        }
-
-        // pass the request along the filter chain
-        chain.doFilter(request, servletResponse);
-    }
-
-    public void init(FilterConfig fConfig) throws ServletException {
-    }
-
-    @Override
-    public boolean isLoggable(LogRecord record) {
-        return false;
+    @Bean
+    public WebMvcConfigurer corsConfigurer() {
+        return new WebMvcConfigurer() {
+            @Override
+            public void addCorsMappings(CorsRegistry registry) {
+                registry.addMapping("/**") // מאפשר לכל הנתיבים
+                        .allowedOrigins("http://localhost:8080") // מותר מה-Frontend שלך
+                        .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
+                        .allowedHeaders("*")
+                        .allowCredentials(true); // מאפשר קובצי cookie ו־Authorization header
+            }
+        };
     }
 }
