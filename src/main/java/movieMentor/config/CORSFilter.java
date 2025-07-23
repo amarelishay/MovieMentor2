@@ -1,4 +1,4 @@
-package com.movimentor.config;
+package movieMentor.config;
 
 import jakarta.servlet.*;
 import jakarta.servlet.http.HttpServletResponse;
