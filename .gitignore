@@ -21,7 +21,7 @@ Thumbs.db
 *.secret
 
 # Spring config
-src/main/resources/application.properties
+#src/main/resources/application.properties
 
 # Python cache
 __pycache__/
