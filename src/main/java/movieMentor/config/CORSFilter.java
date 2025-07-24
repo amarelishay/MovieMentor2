@@ -1,44 +1,45 @@
 package movieMentor.config;
 
-import jakarta.servlet.*;
-import jakarta.servlet.http.HttpServletRequest;
-import jakarta.servlet.http.HttpServletResponse;
-import org.springframework.stereotype.Component;
-
+import javax.servlet.*;
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
 import java.io.IOException;
+
+import org.springframework.stereotype.Component;
 
 @Component
 public class CORSFilter implements Filter {
 
     @Override
     public void init(FilterConfig filterConfig) throws ServletException {
-        // Initialization if needed
+        // לא דרוש
     }
 
     @Override
-    public void doFilter(ServletRequest request, ServletResponse response, FilterChain chain)
-            throws IOException, ServletException {
+    public void doFilter(
+            ServletRequest servletRequest,
+            ServletResponse servletResponse,
+            FilterChain filterChain
+    ) throws IOException, ServletException {
 
-        HttpServletRequest req = (HttpServletRequest) request;
-        HttpServletResponse res = (HttpServletResponse) response;
+        HttpServletRequest request = (HttpServletRequest) servletRequest;
+        HttpServletResponse response = (HttpServletResponse) servletResponse;
 
-        res.setHeader("Access-Control-Allow-Origin", "http://localhost:8080");
-        res.setHeader("Access-Control-Allow-Methods", "POST, GET, OPTIONS, DELETE, PUT");
-        res.setHeader("Access-Control-Max-Age", "3600");
-        res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type, Accept");
-        res.setHeader("Access-Control-Allow-Credentials", "true");
+        response.setHeader("Access-Control-Allow-Origin", "http://localhost:8080");
+        response.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+        response.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type");
+        response.setHeader("Access-Control-Allow-Credentials", "true");
 
-        // Handle preflight requests
-        if ("OPTIONS".equalsIgnoreCase(req.getMethod())) {
-            res.setStatus(HttpServletResponse.SC_OK);
+        if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
+            response.setStatus(HttpServletResponse.SC_OK);
             return;
         }
 
-        chain.doFilter(request, response);
+        filterChain.doFilter(servletRequest, servletResponse);
     }
 
     @Override
     public void destroy() {
-        // Cleanup if needed
+        // לא דרוש
     }
 }
