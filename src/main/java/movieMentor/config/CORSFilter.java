@@ -1,4 +1,4 @@
-package com.moviementor.moviementor.config;
+package movieMentor.config;
 
 import jakarta.servlet.*;
 import jakarta.servlet.http.HttpServletRequest;
