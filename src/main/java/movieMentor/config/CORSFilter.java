@@ -1,5 +1,4 @@
 package movieMentor.config;
-
 import org.springframework.stereotype.Component;
 
 import javax.servlet.*;
@@ -17,26 +16,25 @@ public class CORSFilter implements Filter {
         HttpServletRequest req = (HttpServletRequest) request;
         HttpServletResponse res = (HttpServletResponse) response;
 
-        // ✅ מותר ל־Vite ול־React לדבר עם ה־API
-        res.setHeader("Access-Control-Allow-Origin", "http://localhost:5173");
-        res.setHeader("Access-Control-Allow-Credentials", "true");
+        // ✅ מאפשר גישה מ-כל דומיין
+        res.setHeader("Access-Control-Allow-Origin", "*");
 
-        // ✅ אילו מתודות מותרות
+        // ✅ מתודות שמותרות
         res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
 
-        // ✅ אילו כותרות מותרות (כולל Authorization)
-        res.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type, X-Requested-With");
+        // ✅ מאפשר לשלוח כל כותרת כולל Authorization
+        res.setHeader("Access-Control-Allow-Headers", "*");
 
-        res.setHeader("Vary", "Origin");
+        // ✅ קובע caching של preflight
         res.setHeader("Access-Control-Max-Age", "3600");
 
-        // ✅ אם הבקשה היא OPTIONS (Preflight) – מחזירים 200 ריק וזהו
+        // ✅ אם הבקשה היא OPTIONS – מחזירים תשובת 200 מיד
         if ("OPTIONS".equalsIgnoreCase(req.getMethod())) {
             res.setStatus(HttpServletResponse.SC_OK);
             return;
         }
 
-        // ממשיכים את השרשרת
+        // ממשיכים בשרשרת
         chain.doFilter(request, response);
     }
 }
