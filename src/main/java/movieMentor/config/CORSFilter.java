@@ -1,12 +1,12 @@
 package movieMentor.config;
 
-import javax.servlet.Filter; // שינוי כאן
-import javax.servlet.FilterChain; // שינוי כאן
-import javax.servlet.ServletException; // שינוי כאן
-import javax.servlet.ServletRequest; // שינוי כאן
-import javax.servlet.ServletResponse; // שינוי כאן
-import javax.servlet.http.HttpServletRequest; // שינוי כאן
-import javax.servlet.http.HttpServletResponse; // שינוי כאן
+import javax.servlet.Filter; // שונה ל-javax
+import javax.servlet.FilterChain; // שונה ל-javax
+import javax.servlet.ServletException; // שונה ל-javax
+import javax.servlet.ServletRequest; // שונה ל-javax
+import javax.servlet.ServletResponse; // שונה ל-javax
+import javax.servlet.http.HttpServletRequest; // שונה ל-javax
+import javax.servlet.http.HttpServletResponse; // שונה ל-javax
 
 import org.springframework.core.annotation.Order;
 import org.springframework.stereotype.Component;
@@ -24,19 +24,20 @@ public class CORSFilter implements Filter {
         HttpServletRequest request = (HttpServletRequest) req;
         HttpServletResponse response = (HttpServletResponse) res;
 
-        // הדפסות דיבוג - ניתן להסיר ב-Production
+        // --- הדפסות דיבוג - חשוב לבדוק בלוגים של Render! ---
         System.out.println("CORSFilter: Processing request for path: " + request.getRequestURI());
         System.out.println("CORSFilter: Request Method: " + request.getMethod());
+        // ---------------------------------------------------
 
-
-        response.setHeader("Access-Control-Allow-Origin", "*");
+        response.setHeader("Access-Control-Allow-Origin", "*"); // פתוח לכל המקורות (לפיתוח!)
         response.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
         response.setHeader("Access-Control-Allow-Headers", "Authorization, Content-Type");
         response.setHeader("Access-Control-Allow-Credentials", "true");
-        response.setHeader("Access-Control-Max-Age", "3600"); // הגדר זמן Cache לבקשות Preflight
+        response.setHeader("Access-Control-Max-Age", "3600"); // מאפשר לדפדפן לשמור ב-Cache את תוצאות Preflight למשך שעה
 
+        // טיפול בבקשות OPTIONS (Preflight)
         if ("OPTIONS".equalsIgnoreCase(request.getMethod())) {
-            System.out.println("CORSFilter: Handling OPTIONS preflight request.");
+            System.out.println("CORSFilter: Handling OPTIONS preflight request. Setting status to OK.");
             response.setStatus(HttpServletResponse.SC_OK);
         } else {
             chain.doFilter(req, res);
