@@ -123,13 +123,7 @@
             <scope>runtime</scope>
         </dependency>
 
-        <!-- Jakarta Servlet API (Optional) -->
-        <dependency>
-            <groupId>jakarta.servlet</groupId>
-            <artifactId>jakarta.servlet-api</artifactId>
-            <version>5.0.0</version>
-            <scope>provided</scope>
-        </dependency>
+
 
         <!-- Test -->
         <dependency>
