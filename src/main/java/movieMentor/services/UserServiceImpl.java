@@ -3,6 +3,8 @@ package movieMentor.services;
 import lombok.RequiredArgsConstructor;
 import movieMentor.beans.Movie;
 import movieMentor.beans.User;
+import movieMentor.dto.MovieDTO;
+import movieMentor.repository.MovieRepository;
 import movieMentor.repository.UserRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -15,6 +17,8 @@ import java.util.*;
 import java.util.stream.Collectors;
 
 @Service
+@Transactional
+
 @RequiredArgsConstructor
 public class UserServiceImpl implements UserService {
 
@@ -25,6 +29,7 @@ public class UserServiceImpl implements UserService {
     private final EmbeddingService embeddingService;
     private final EmbeddingStorageService embeddingStorageService;
     private final UserVectorClientService userVectorClient;
+    private final MovieRepository movieRepository;
 
     @Override
     @Transactional
@@ -139,17 +144,29 @@ public class UserServiceImpl implements UserService {
         return weightedSum;
     }
 
-    @Cacheable(value = "userRecommendations", key = "#username")
     @Override
-    public List<Movie> getRecommendations(String username) {
-        return fetchUser(username).getRecommendedMovies();
+    @Transactional(readOnly = true)
+    @Cacheable(cacheNames = "userRecs", key = "#username")
+    public List<MovieDTO> getRecommendations(String username) {
+        User u = userRepository.findByUsername(username)
+                .orElseThrow(() -> new IllegalArgumentException("User not found"));
+        u.getRecommendedMovies().size();
+        return u.getRecommendedMovies().stream()
+                .map(MovieDTO::new)
+                .collect(Collectors.toList());
     }
 
-    @Cacheable(value = "userFavorites", key = "#username")
     @Override
-    @Transactional
-    public List<Movie> getFavorites(String username) {
-        return fetchUser(username).getFavoriteMovies();
+    @Transactional(readOnly = true)
+    @Cacheable(cacheNames = "userFavorites", key = "#username")
+    public List<MovieDTO> getFavorites(String username) {
+        User u = userRepository.findByUsername(username)
+                .orElseThrow(() -> new IllegalArgumentException("User not found"));
+        // לדרוך על ה‑LAZY לפני סיריאליזציה
+        u.getFavoriteMovies().size();
+        return u.getFavoriteMovies().stream()
+                .map(MovieDTO::new)
+                .collect(Collectors.toList());
     }
 
     @Override

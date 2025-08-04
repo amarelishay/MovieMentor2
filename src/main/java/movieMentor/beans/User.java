@@ -1,6 +1,12 @@
 package movieMentor.beans;
 
-import lombok.*;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
+import org.hibernate.annotations.Fetch;
+import org.hibernate.annotations.FetchMode;
+
 import javax.persistence.*;
 import javax.validation.constraints.Email;
 import java.time.LocalDate;
@@ -30,7 +36,7 @@ public class User {
 
     private String password;
     private LocalDate birthDate;
-
+    @Fetch(FetchMode.SUBSELECT)
     @ManyToMany(fetch = FetchType.LAZY)
     @JoinTable(
             name = "user_favorite_movies",
@@ -38,7 +44,7 @@ public class User {
             inverseJoinColumns = @JoinColumn(name = "movie_id")
     )
     private List<Movie> favoriteMovies = new ArrayList<>();
-
+    @Fetch(FetchMode.SUBSELECT)
     @ManyToMany(fetch = FetchType.LAZY)
     @JoinTable(
             name = "user_watch_history",
@@ -46,7 +52,7 @@ public class User {
             inverseJoinColumns = @JoinColumn(name = "movie_id")
     )
     private List<Movie> watchHistory = new ArrayList<>();
-
+    @Fetch(FetchMode.SUBSELECT)
     @ManyToMany(fetch = FetchType.LAZY)
     @JoinTable(
             name = "user_recommendations",

@@ -1,7 +1,7 @@
 package movieMentor.controllers;
 
 import lombok.RequiredArgsConstructor;
-import movieMentor.beans.Movie;
+import movieMentor.dto.MovieDTO;
 import movieMentor.services.UserService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -20,54 +20,38 @@ public class UserController {
     private final UserService userService;
 
     @PostMapping("/favorites/{title}")
-    public ResponseEntity<?> addFavorite(@PathVariable String title, Authentication auth) {
+    public ResponseEntity<String> addFavorite(@PathVariable String title, Authentication auth) {
         String username = auth.getName();
-        log.info("📌 {} is adding '{}' to favorites", username, title);
+        log.info("📌 {} adds '{}' to favorites", username, title);
         userService.addFavoriteMovie(username, title);
-        return ResponseEntity.ok("✔️ סרט נוסף למועדפים");
+        return ResponseEntity.ok("✔️ נוסף למועדפים");
+    }
+
+    @DeleteMapping("/delete_favorites/{movieId}")
+    public ResponseEntity<Void> removeFavorite(@PathVariable Long movieId, Authentication auth) {
+        userService.removeFavoriteMovie(auth.getName(), movieId);
+        return ResponseEntity.noContent().build();
     }
 
     @PostMapping("/history/{title}")
-    public ResponseEntity<?> addToHistory(@PathVariable String title, Authentication auth) {
-        String username = auth.getName();
-        log.info("📌 {} is adding '{}' to watch history", username, title);
-        userService.addToWatchHistory(username, title);
+    public ResponseEntity<String> addToHistory(@PathVariable String title, Authentication auth) {
+        userService.addToWatchHistory(auth.getName(), title);
         return ResponseEntity.ok("👁️ נוסף להיסטוריית צפייה");
     }
 
     @PostMapping("/recommendations")
-    public ResponseEntity<?> updateRecommendations(@RequestBody List<String> titles, Authentication auth) {
-        String username = auth.getName();
-        log.info("🔁 {} is updating recommendations with: {}", username, titles);
-        userService.setRecommendedMovies(username, titles);
+    public ResponseEntity<String> updateRecommendations(@RequestBody List<String> titles, Authentication auth) {
+        userService.setRecommendedMovies(auth.getName(), titles);
         return ResponseEntity.ok("✅ רשימת ההמלצות עודכנה");
     }
 
     @GetMapping("/recommendations")
-    public ResponseEntity<List<Movie>> getRecommendations(Authentication auth) {
-        String username = auth.getName();
-        log.info("📥 {} is retrieving recommendations", username);
-        return ResponseEntity.ok(userService.getRecommendations(username));
+    public ResponseEntity<List<MovieDTO>> getRecommendations(Authentication auth) {
+        return ResponseEntity.ok(userService.getRecommendations(auth.getName()));
     }
 
     @GetMapping("/favorites")
-    public ResponseEntity<List<Movie>> getFavorites(Authentication auth){
-        String username = auth.getName();
-        log.info("📥 {} is retrieving favorites movies", username);
-        return ResponseEntity.ok(userService.getFavorites(username));
+    public ResponseEntity<List<MovieDTO>> getFavorites(Authentication auth){
+        return ResponseEntity.ok(userService.getFavorites(auth.getName()));
     }
-
-    @GetMapping("/history")
-    public ResponseEntity<List<Movie>> getHistory(Authentication auth){
-        String username = auth.getName();
-        log.info("📥 {} is retrieving watch history", username);
-        return ResponseEntity.ok(userService.getHistory(username));
-    }
-    @DeleteMapping("/delete_favorites/{movieId}")
-    public ResponseEntity<Void> removeFavoriteMovie(@PathVariable Long movieId,Authentication auth) {
-        String username = auth.getName();
-        userService.removeFavoriteMovie(username, movieId);
-        return ResponseEntity.noContent().build();
-    }
-
 }

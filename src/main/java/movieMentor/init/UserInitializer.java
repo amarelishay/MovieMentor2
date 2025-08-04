@@ -50,33 +50,8 @@ public class UserInitializer implements CommandLineRunner {
         userRepository.save(user);
         logger.info("Created new user: {}", username);
 
-//        List<Movie> topRatedRaw = tmdbService.getTopRatedMovies();
-//        List<Movie> nowPlayingRaw = tmdbService.getNowPlayingMovies();
-//
-//        List<Movie> candidates = new ArrayList<>();
-//
-//        try {
-//            for (Movie movie : topRatedRaw) {
-//                candidates.add(movie);
-//            }
-//
-//            for (Movie movie : nowPlayingRaw) {
-//                candidates.add(movie);
-//            }
-//            TopMoviesData[] topMovies = TopMoviesData.values();
-//            for (TopMoviesData movie : topMovies) {
-//                Movie addedMovie = tmdbService.getOrCreateMovie(movie.getTitle());
-//                candidates.add(addedMovie);
-//                if (!embeddingStorageService.hasEmbedding(addedMovie.getId())) {
-//                    logger.info("movie {} was added from enum", movie.getTitle());
-//                    embeddingStorageService.addEmbedding(addedMovie.getId(), embeddingService.getEmbedding(movie.getDescription()));
-//                }
-//            }
-//        } catch (Exception e) {
-//            logger.error("❌ Error processing candidate movies", e);
-//        }
         // סרטים אהובים
-        Arrays.asList("harry potter", "spongebob", "The Dark Knight","מכתוב","המשגיחים").forEach(title ->
+        Arrays.asList("harry potter", "spongebob").forEach(title ->
                 safe(() -> userService.addFavoriteMovie(username, title)));
 
         // היסטוריית צפייה

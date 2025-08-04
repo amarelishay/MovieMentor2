@@ -2,6 +2,7 @@ package movieMentor.services;
 
 import movieMentor.beans.Movie;
 import movieMentor.beans.User;
+import movieMentor.dto.MovieDTO;
 
 import java.util.List;
 
@@ -13,9 +14,9 @@ public interface UserService {
 
     void addToWatchHistory(String username, String movieTitle);
 
-    List<Movie> getRecommendations(String username);
+    List<MovieDTO> getRecommendations(String username);
 
-    List<Movie> getFavorites(String username);
+    List<MovieDTO> getFavorites(String username);
 
     List<Movie> getHistory(String username);
 
