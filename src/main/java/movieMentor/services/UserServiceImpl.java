@@ -29,7 +29,6 @@ public class UserServiceImpl implements UserService {
     private final EmbeddingService embeddingService;
     private final EmbeddingStorageService embeddingStorageService;
     private final UserVectorClientService userVectorClient;
-    private final MovieRepository movieRepository;
 
     @Override
     @Transactional

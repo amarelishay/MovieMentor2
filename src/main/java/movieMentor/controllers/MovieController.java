@@ -6,16 +6,20 @@ import movieMentor.beans.Movie;
 import movieMentor.dto.MovieDTO;
 import movieMentor.services.MovieService;
 import movieMentor.services.TmdbService;
+import movieMentor.services.UserServiceImpl;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.logging.Logger;
 
 @Api(value = "Movie API", description = "Operations related to movies")
 @RestController
 @RequestMapping("/api/movies")
 public class MovieController {
+    private static final org.slf4j.Logger logger = LoggerFactory.getLogger(UserServiceImpl.class);
 
     @Autowired
     private MovieService movieService;
@@ -44,10 +48,11 @@ public class MovieController {
     @ApiOperation(value = "Search for movies via TMDB API")
     @GetMapping("/search")
     @Cacheable(value = "search", key = "#query + ':' + (#page != null ? #page : 1)")
-    public List<MovieDTO> searchMovies(@RequestParam String query,
-                                       @RequestParam(required = false, defaultValue = "1") int page) {
+    public List<MovieDTO> searchMovies(@RequestParam String query, @RequestParam(required = false, defaultValue = "1") int page) {
+        List<MovieDTO> movies=MovieDTO.toDTOlist(tmdbService.searchMovies(query));
         // אם ה-service תומך בעמודים, תעביר page; אם לא – השאר כך
-        return MovieDTO.toDTOlist(tmdbService.searchMovies(query));
+        logger.info("found movies ({}): [{}]", movies);
+        return movies;
     }
 
     @ApiOperation(value = "Get now-playing movies from TMDB")
@@ -84,6 +89,8 @@ public class MovieController {
     @ApiOperation(value = "Get movie by id from TMDB")
     @GetMapping("/{id}")
     public Movie getMovieById(@PathVariable long id) {
-        return movieService.getMovieById(id);
+        Movie movie=tmdbService.getOrCreateMovieById(id);
+        logger.info("fetch movie ({}): [{}]", movie);
+        return movie;
     }
 }

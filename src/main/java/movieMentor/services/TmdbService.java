@@ -3,6 +3,7 @@ package movieMentor.services;
 import movieMentor.beans.Actor;
 import movieMentor.beans.Genre;
 import movieMentor.beans.Movie;
+import movieMentor.dto.MovieDTO;
 import movieMentor.models.MovieImage;
 
 import java.util.List;
@@ -19,6 +20,8 @@ public interface TmdbService {
      */
     List<Movie> searchMovies(String query);
 
+//    List<MovieDTO> searchMoviesDtos(String query);
+
     /**
      * Get or create a movie by its title.
      * If the movie is not in the database, fetch it from TMDB and save it with its actors.
@@ -29,6 +32,7 @@ public interface TmdbService {
     Movie getOrCreateMovie(String title);
 
 
+    Movie getOrCreateMovieById(long id);
 
     /**
      * Fetch a list of now playing movies in Israel region.

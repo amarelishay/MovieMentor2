@@ -18,14 +18,16 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cache.annotation.Cacheable;
 import org.springframework.http.*;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.RestTemplate;
 import org.springframework.web.util.UriUtils;
 
-import org.springframework.transaction.annotation.Transactional;
+import javax.annotation.PostConstruct;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
 import java.util.*;
 import java.util.stream.Collectors;
+
 @Transactional
 @Service
 @RequiredArgsConstructor
@@ -35,17 +37,35 @@ public class TmdbServiceImpl implements TmdbService {
     private final RestTemplate restTemplate = new RestTemplate();
     private final MovieRepository movieRepository;
     private final ActorRepository actorRepository;
+    private final EmbeddingStorageService embeddingStorageService;
+    private final EmbeddingService embeddingService;
     @Value("${tmdb.api.token}")
     private String apiToken;
     @Value("${tmdb.api.base-url}")
     private String apiBaseUrl;
-    private final EmbeddingStorageService embeddingStorageService;
-    private final EmbeddingService embeddingService;
+
     @Override
     public List<Movie> searchMovies(String query) {
-        String url = apiBaseUrl + "/search/movie?page=1&query=" + UriUtils.encode(query, StandardCharsets.UTF_8);
-        return fetchMoviesFromTmdb(url);
+        List<Movie> localResults = movieRepository.findByTitleContainingIgnoreCase(query);
+
+        // תמיד נחזיר גם את מה שכבר יש
+        List<Movie> results = new ArrayList<>(localResults);
+
+        // נמשוך רק אם אין תוצאה מדויקת במסד (ולא סתם חלקי)
+        boolean hasExactMatch = localResults.stream()
+                .anyMatch(m -> m.getTitle().equalsIgnoreCase(query));
+
+        if (!hasExactMatch) {
+            // נמשוך וניתן למטודה הקיימת לטפל בשמירה
+            Movie fetched = getOrCreateMovie(query);
+            if (fetched != null && localResults.stream().noneMatch(m -> m.getId().equals(fetched.getId()))) {
+                results.add(fetched);
+            }
+        }
+
+        return results;
     }
+
 
     @Override
     public Movie getOrCreateMovie(String title) {
@@ -54,20 +74,64 @@ public class TmdbServiceImpl implements TmdbService {
                 .orElseGet(() -> {
                     List<Movie> movies = searchMovies(title);
                     if (movies.isEmpty()) {
-                        throw new RuntimeException("Movie not found in TMDB: " + title);
+                        logger.info("Movie not found in TMDB: {}", title);
                     }
-                    return movieRepository.saveAndFlush(movies.get(0));
+                    return saveMovie(movies.get(0));
                 });
     }
 
 
-    @Cacheable(value = "nowPlaying")
     @Override
-    public List<Movie> getNowPlayingMovies() {
-        String url = apiBaseUrl + "/movie/now_playing?language=en-US&page=1&region=IL";
-        return fetchMovieListFromTmdbJson(url);
+    public synchronized Movie getOrCreateMovieById(long id) {
+        return movieRepository.findById(id)
+                .orElseGet(() -> {
+                    String url = apiBaseUrl + "/movie/" + id + "?append_to_response=credits,images,videos";
+                    try {
+                        ResponseEntity<TmdbMovie> response = restTemplate.exchange(
+                                url,
+                                HttpMethod.GET,
+                                createRequestEntity(),
+                                TmdbMovie.class
+                        );
 
+                        if (response.getStatusCode() == HttpStatus.OK && response.getBody() != null) {
+                            TmdbMovie tmdbMovie = response.getBody();
+                            Movie movie = buildMovieFromTmdb(tmdbMovie);
+                            return saveMovie(movie);
+                        }
+                    } catch (Exception e) {
+                        logger.error("❌ Failed to fetch movie by ID {}: {}", id, e.getMessage());
+                    }
+
+                    throw new RuntimeException("Movie not found in TMDB: " + id);
+                });
     }
+
+
+    @Override
+    @Cacheable("nowPlaying")
+    public List<Movie> getNowPlayingMovies() {
+        String url = apiBaseUrl + "/movie/now_playing?language=en-US&page=1";
+        List<Movie> fetchedMovies = fetchMoviesFromTmdb(url);
+
+        if (fetchedMovies == null || fetchedMovies.isEmpty()) {
+            logger.warn("No movies fetched from TMDB now playing endpoint.");
+            return Collections.emptyList();
+        }
+
+        List<Movie> savedMovies = new ArrayList<>();
+        for (Movie movie : fetchedMovies) {
+            try {
+                Movie saved = saveMovie(movie); // שימוש במטודה שלך ששומרת סרט אחד
+                savedMovies.add(saved);
+            } catch (Exception e) {
+                logger.warn("Failed to save movie with ID {}: {}", movie.getId(), e.getMessage());
+            }
+        }
+
+        return savedMovies;
+    }
+
 
     @Cacheable(value = "upComing")
     @Override
@@ -181,19 +245,23 @@ public class TmdbServiceImpl implements TmdbService {
             if (response.getStatusCode() == HttpStatus.OK && response.getBody() != null) {
                 List<Actor> actors = new ArrayList<>();
                 JsonNode cast = response.getBody().get("cast");
-                for (int i = 0; i < Math.min(20, cast.size()); i++) {
+                for (int i = 0; i < Math.min(24, cast.size()); i++) {
                     JsonNode actorNode = cast.get(i);
                     String name = actorNode.get("name").asText();
                     String imagePath = actorNode.hasNonNull("profile_path") ? actorNode.get("profile_path").asText() : null;
 
-                    Actor actor = actorRepository.findByName(name).orElseGet(() -> {
+                    Long tmdbId = actorNode.get("id").asLong();
+                    Long id = actorNode.get("id").asLong();
+
+                    Actor actor = actorRepository.findByTmdbId(tmdbId).orElseGet(() -> {
                         Actor newActor = new Actor();
+                        newActor.setId(id);
+//                        newActor.setTmdbId(tmdbId);
                         newActor.setName(name);
                         newActor.setImageUrl(imagePath != null ? "https://image.tmdb.org/t/p/w500" + imagePath : null);
-//                        return actorRepository.saveAndFlush(newActor);
-                        return newActor;
-
+                        return actorRepository.saveAndFlush(newActor);
                     });
+
                     actors.add(actor);
                 }
                 return actors;
@@ -228,23 +296,33 @@ public class TmdbServiceImpl implements TmdbService {
     }
 
     // ------- Private Helpers -------
-
+    @Transactional
+    public Movie saveMovie(Movie movie) {
+        return movieRepository.saveAndFlush(movie);
+    }
     private List<Movie> fetchMoviesFromTmdb(String url) {
         try {
-            ResponseEntity<MovieSearchResponse> response = restTemplate.exchange(url, HttpMethod.GET, createRequestEntity(), MovieSearchResponse.class);
+            ResponseEntity<MovieSearchResponse> response =
+                    restTemplate.exchange(url, HttpMethod.GET, createRequestEntity(), MovieSearchResponse.class);
+
             if (response.getStatusCode() == HttpStatus.OK && response.getBody() != null) {
-                List<Movie> movies = new ArrayList<>();
-                TmdbMovie tmdbMovie = response.getBody().getResults().get(0);
-                Movie movie = movieRepository.findById(tmdbMovie.getId())
-                        .orElseGet(() -> buildMovieFromTmdb(tmdbMovie));
-                movies.add(movie);
-                return movies;
+                List<TmdbMovie> results = response.getBody().getResults();
+                if (results == null || results.isEmpty()) {
+                    return Collections.emptyList();
+                }
+
+                return results.stream()
+                        .map(tmdbMovie -> movieRepository.findById(tmdbMovie.getId())
+                                .orElseGet(() -> buildMovieFromTmdb(tmdbMovie)))
+                        .filter(Objects::nonNull)
+                        .collect(Collectors.toList());
             }
         } catch (Exception e) {
-            logger.error("Error fetching movies from TMDB: {}", e.getMessage());
+            logger.error("Error fetching movies from TMDB: {}", e.getMessage(), e);
         }
         return Collections.emptyList();
     }
+
     private List<Movie> fetchMovieListFromTmdbJson(String url) {
         ResponseEntity<MovieSearchResponse> response = restTemplate.exchange(
                 url,
@@ -259,33 +337,25 @@ public class TmdbServiceImpl implements TmdbService {
     }
 
 
-    //    private Movie saveMovieWithActors(Movie movie) {
-//        Movie managedMovie = movieRepository.findById(movie.getId())
-//                .orElseGet(() -> movieRepository.saveAndFlush(movie));
-//
-//        Set<Actor> managedActors = new HashSet<>(getActorsForMovie(managedMovie.getId()));
-//        managedMovie.setActors(managedActors);
-//        return movieRepository.saveAndFlush(managedMovie);
-//    }
-public List<Movie> prepareCandidateMovies() {
-    List<Movie> candidates = new ArrayList<>();
-    candidates.addAll(getTopRatedMovies());
-    candidates.addAll(getNowPlayingMovies());
+    public List<Movie> prepareCandidateMovies() {
+        List<Movie> candidates = new ArrayList<>();
+        candidates.addAll(getTopRatedMovies());
+        candidates.addAll(getNowPlayingMovies());
 
-    for (Movie movie : candidates) {
-        Long id = movie.getId();
-        if (!embeddingStorageService.hasEmbedding(id)) {
-            String overview = movie.getOverview();
-            if (overview != null && !overview.isBlank()) {
-                float[] vector = embeddingService.getEmbedding(overview);
-                embeddingStorageService.addEmbedding(id, vector);
-                logger.info("🧠 Embedded candidate movie '{}'", movie.getTitle());
+        for (Movie movie : candidates) {
+            Long id = movie.getId();
+            if (!embeddingStorageService.hasEmbedding(id)) {
+                String overview = movie.getOverview();
+                if (overview != null && !overview.isBlank()) {
+                    float[] vector = embeddingService.getEmbedding(overview);
+                    embeddingStorageService.addEmbedding(id, vector);
+                    logger.info("🧠 Embedded candidate movie '{}'", movie.getTitle());
+                }
             }
         }
-    }
 
-    return candidates;
-}
+        return candidates;
+    }
 
     private Movie buildMovieFromTmdb(TmdbMovie tmdbMovie) {
         return Movie.builder()
@@ -305,16 +375,6 @@ public List<Movie> prepareCandidateMovies() {
                 .build();
     }
 
-//    private TmdbMovie fetchTmdbMovieById(Long movieId) {
-//        String url = apiBaseUrl + "/movie/" + movieId + "?language=en-US";
-//        try {
-//            ResponseEntity<TmdbMovie> response = restTemplate.exchange(url, HttpMethod.GET, createRequestEntity(), TmdbMovie.class);
-//            return response.getBody();
-//        } catch (Exception e) {
-//            logger.warn("Failed to fetch movie by ID: {}", movieId, e);
-//            throw new RuntimeException("Movie not found");
-//        }
-//    }
 
     private LocalDate parseDate(String dateStr) {
         try {

@@ -5,11 +5,14 @@ import movieMentor.beans.Movie;
 import movieMentor.beans.User;
 import movieMentor.enums.TopMoviesData;
 import movieMentor.models.MovieImage;
+import movieMentor.repository.MovieRepository;
 import movieMentor.repository.UserRepository;
 import movieMentor.utils.EmbeddingUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
+import org.springframework.cache.CacheManager;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
@@ -32,10 +35,11 @@ public class RecommendationService {
     private final EmbeddingStorageService embeddingStorageService;
     private final UserSimilarityService userSimilarityService;
     private final UserRepository userRepository;
+    private final MovieRepository movieRepository;
     private final Map<String, float[]> candidateEmbeddings = new HashMap<>();
     private final List<Movie> candidates = new ArrayList<>();
-    // ה-RestTemplate אינו נחוץ ישירות כאן, מכיוון שה-EmbeddingService מטפל בשיחות ה-REST.
-    // private final RestTemplate restTemplate = new RestTemplate();
+    @Autowired
+    private CacheManager cacheManager;
     private static final int OPENAI_EMBEDDING_DIMENSION = 1536; // ברירת מחדל עבור text-embedding-3-small וגם ada-002
 
     public List<String> generateRecommendations(User user) {
@@ -52,14 +56,20 @@ public class RecommendationService {
 
     }
 
-    @PostConstruct
+//    @PostConstruct
     public void initMovieCandidates() {
         logger.info("🚀 Starting pre-loading of movie candidates...");
 
         try {
             // הוספת סרטים מ-TMDB
-            candidates.addAll(tmdbService.getTopRatedMovies());
+            List<Movie> all = new ArrayList<>();
+            logger.info("retrieving now playing movies");
             candidates.addAll(tmdbService.getNowPlayingMovies());
+            logger.info("retrieving upcoming movies");
+            candidates.addAll(tmdbService.getUpComingMovies());
+            logger.info("retrieving top rated movies");
+            candidates.addAll(tmdbService.getTopRatedMovies());
+
 
             // הוספת סרטים מה-enum
             for (TopMoviesData movieData : TopMoviesData.values()) {
@@ -98,6 +108,15 @@ public class RecommendationService {
                     }
                 } else {
                     logger.warn("❌ Could not retrieve movie from TMDB for enum entry: {}", movieData.getTitle());
+                }
+            }
+            cacheManager.getCache("candidateMovies").put("all", new ArrayList<>(candidates));
+            logger.info("📦 candidateMovies cached in Redis");
+            int saved = 0;
+            for (Movie movie : candidates) {
+                if (!movieRepository.existsById(movie.getId())) {
+                    movieRepository.saveAndFlush(movie);
+                    saved++;
                 }
             }
         } catch (Exception e) {

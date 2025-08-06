@@ -51,7 +51,7 @@ public class UserInitializer implements CommandLineRunner {
         logger.info("Created new user: {}", username);
 
         // סרטים אהובים
-        Arrays.asList("harry potter", "spongebob").forEach(title ->
+        Arrays.asList("harry potter", "spongebob","The Fast and the Furious").forEach(title ->
                 safe(() -> userService.addFavoriteMovie(username, title)));
 
         // היסטוריית צפייה

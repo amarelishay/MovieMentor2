@@ -16,6 +16,7 @@ public class Actor implements Serializable {
     private Long id;
     private String name;
     private String imageUrl;
+    private Long tmdbId;
 
 
 

@@ -9,5 +9,6 @@ import java.util.Optional;
 public interface ActorRepository extends JpaRepository<Actor, Long> {
     Optional<Actor> findByName(String name);
     List<Actor> findAllByName(String name);
+    Optional<Actor> findByTmdbId(Long tmdbId);
 
 }

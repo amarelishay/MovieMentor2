@@ -25,6 +25,4 @@ public interface MovieRepository extends JpaRepository<Movie, Long> {
 //    Optional<Movie> findByTitle(String title);
     List<Movie> findAllByTitle(String title);
 
-    // מתודה למציאת סרט לפי ID (קיים אוטומטית מ־JpaRepository, אבל תזכורת)
-    // Optional<Movie> findById(Long id);
 }
