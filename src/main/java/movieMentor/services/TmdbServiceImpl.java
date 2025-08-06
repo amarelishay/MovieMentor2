@@ -46,24 +46,8 @@ public class TmdbServiceImpl implements TmdbService {
 
     @Override
     public List<Movie> searchMovies(String query) {
-        List<Movie> localResults = movieRepository.findByTitleContainingIgnoreCase(query);
-
-        // תמיד נחזיר גם את מה שכבר יש
-        List<Movie> results = new ArrayList<>(localResults);
-
-        // נמשוך רק אם אין תוצאה מדויקת במסד (ולא סתם חלקי)
-        boolean hasExactMatch = localResults.stream()
-                .anyMatch(m -> m.getTitle().equalsIgnoreCase(query));
-
-        if (!hasExactMatch) {
-            // נמשוך וניתן למטודה הקיימת לטפל בשמירה
-            Movie fetched = getOrCreateMovie(query);
-            if (fetched != null && localResults.stream().noneMatch(m -> m.getId().equals(fetched.getId()))) {
-                results.add(fetched);
-            }
-        }
-
-        return results;
+        String url = apiBaseUrl + "/search/movie?page=1&query=" + UriUtils.encode(query, StandardCharsets.UTF_8);
+        return fetchMoviesFromTmdb(url);
     }
 
 
@@ -74,9 +58,9 @@ public class TmdbServiceImpl implements TmdbService {
                 .orElseGet(() -> {
                     List<Movie> movies = searchMovies(title);
                     if (movies.isEmpty()) {
-                        logger.info("Movie not found in TMDB: {}", title);
+                        throw new RuntimeException("Movie not found in TMDB: " + title);
                     }
-                    return saveMovie(movies.get(0));
+                    return movieRepository.saveAndFlush(movies.get(0));
                 });
     }
 
