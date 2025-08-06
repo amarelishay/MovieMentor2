@@ -54,7 +54,14 @@ public class MovieController {
         logger.info("found movies ({}): [{}]", movies);
         return movies;
     }
-
+    @ApiOperation(value = "Search for movies via TMDB API")
+    @GetMapping("/searchMovie")
+    @Cacheable(value = "search", key = "#query ")
+    public Movie searchMovie(@RequestParam String query) {
+       Movie movie=tmdbService.getOrCreateMovie(query);
+        logger.info("found movie {}", movie.getTitle());
+        return movie;
+    }
     @ApiOperation(value = "Get now-playing movies from TMDB")
     @GetMapping("/now-playing")
     @Cacheable(value = "nowPlaying", key = "#page")
