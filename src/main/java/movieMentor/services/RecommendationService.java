@@ -3,6 +3,7 @@ package movieMentor.services;
 import lombok.RequiredArgsConstructor;
 import movieMentor.beans.Movie;
 import movieMentor.beans.User;
+import movieMentor.beans.MovieDTO;
 import movieMentor.enums.TopMoviesData;
 import movieMentor.models.MovieImage;
 import movieMentor.repository.MovieRepository;
@@ -13,11 +14,8 @@ import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.context.event.ApplicationReadyEvent;
 import org.springframework.cache.CacheManager;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
-import org.springframework.stereotype.Service;
 import org.springframework.context.event.EventListener;
-import org.springframework.web.client.RestTemplate;
+import org.springframework.stereotype.Service;
 
 import javax.annotation.PostConstruct;
 import java.time.LocalDate;
@@ -29,6 +27,7 @@ import java.util.stream.Collectors;
 public class RecommendationService {
 
     private static final Logger logger = LoggerFactory.getLogger(RecommendationService.class);
+    private static final int OPENAI_EMBEDDING_DIMENSION = 1536; // ברירת מחדל עבור text-embedding-3-small וגם ada-002
     private final OpenAiService openAiService;
     private final TmdbService tmdbService;
     private final EmbeddingService embeddingService;
@@ -37,10 +36,9 @@ public class RecommendationService {
     private final UserRepository userRepository;
     private final MovieRepository movieRepository;
     private final Map<String, float[]> candidateEmbeddings = new HashMap<>();
-    private final List<Movie> candidates = new ArrayList<>();
+    private final List<MovieDTO> candidates = new ArrayList<>();
     @Autowired
     private CacheManager cacheManager;
-    private static final int OPENAI_EMBEDDING_DIMENSION = 1536; // ברירת מחדל עבור text-embedding-3-small וגם ada-002
 
     public List<String> generateRecommendations(User user) {
         List<String> favoriteTitles = user.getFavoriteMovies().stream()
@@ -55,36 +53,34 @@ public class RecommendationService {
         return openAiService.getRecommendations(favoriteTitles, historyTitles);
 
     }
-
-//    @PostConstruct
+@PostConstruct
     public void initMovieCandidates() {
         logger.info("🚀 Starting pre-loading of movie candidates...");
 
         try {
-            // הוספת סרטים מ-TMDB
-            List<Movie> all = new ArrayList<>();
+            List<MovieDTO> candidates = new ArrayList<>();
+
             logger.info("retrieving now playing movies");
-            candidates.addAll(tmdbService.getNowPlayingMovies());
+            candidates.addAll(tmdbService.getNowPlayingMoviesDTO());
+
             logger.info("retrieving upcoming movies");
-            candidates.addAll(tmdbService.getUpComingMovies());
+            candidates.addAll(tmdbService.getUpcomingMoviesDTO());
+
             logger.info("retrieving top rated movies");
-            candidates.addAll(tmdbService.getTopRatedMovies());
+            candidates.addAll(tmdbService.getTopRatedMoviesDTO());
 
-
-            // הוספת סרטים מה-enum
             for (TopMoviesData movieData : TopMoviesData.values()) {
-                Movie movie = tmdbService.getOrCreateMovie(movieData.getTitle());
-                logger.info("💿 movie {} was successfully downloaded ", movie.getTitle());
-                if (movie != null) { // ודא שהסרט נמצא לפני הוספתו
+                MovieDTO movie = tmdbService.getOrCreateMovieDTO(movieData.getTitle());
+                if (movie != null) {
+                    logger.info("💿 movie {} was successfully downloaded", movie.getTitle());
                     candidates.add(movie);
 
                     if (!embeddingStorageService.hasEmbedding(movie.getId())) {
                         logger.info("🎬 Adding embedding for movie from enum: {}", movie.getTitle());
-                        String movieOverview = movie.getOverview(); // קבל את התיאור
+                        String overview = movie.getOverview();
 
-                        // **** התיקון לטיפול ב"Missing text" וגודל ה-embedding ****
-                        if (movieOverview != null && !movieOverview.trim().isEmpty()) {
-                            float[] embedding = embeddingService.getEmbedding(movieOverview);
+                        if (overview != null && !overview.trim().isEmpty()) {
+                            float[] embedding = embeddingService.getEmbedding(overview);
                             if (embedding != null && embedding.length == OPENAI_EMBEDDING_DIMENSION) {
                                 embeddingStorageService.addEmbedding(movie.getId(), embedding);
                                 candidateEmbeddings.put(movie.getTitle(), embedding);
@@ -94,46 +90,37 @@ public class RecommendationService {
                         } else {
                             logger.warn("⚠️ Skipping embedding for movie '{}' due to missing or empty overview.", movie.getTitle());
                         }
-                        // ******************************************************
                     } else {
-                        logger.info("ℹ️ Embedding already exists for movie: {}", movie.getTitle());
-                        // אם ה-embedding כבר קיים, ודא שהוא נכנס גם ל-candidateEmbeddings map
                         float[] existingEmbedding = embeddingStorageService.getEmbedding(movie.getId());
-                        // ודא שגם ה-embedding הקיים בגודל 768
                         if (existingEmbedding != null && existingEmbedding.length == OPENAI_EMBEDDING_DIMENSION) {
                             candidateEmbeddings.put(movie.getTitle(), existingEmbedding);
+                            logger.info("ℹ️ Existing embedding for movie '{}' loaded into memory", movie.getTitle());
                         } else {
-                            logger.warn("⚠️ Existing embedding for movie '{}' is invalid or wrong size. Not added to candidateEmbeddings map.", movie.getTitle());
+                            logger.warn("⚠️ Existing embedding for movie '{}' is invalid or wrong size. Skipped.", movie.getTitle());
                         }
                     }
                 } else {
                     logger.warn("❌ Could not retrieve movie from TMDB for enum entry: {}", movieData.getTitle());
                 }
             }
+
             cacheManager.getCache("candidateMovies").put("all", new ArrayList<>(candidates));
             logger.info("📦 candidateMovies cached in Redis");
-            int saved = 0;
-            for (Movie movie : candidates) {
-                if (!movieRepository.existsById(movie.getId())) {
-                    movieRepository.saveAndFlush(movie);
-                    saved++;
-                }
-            }
+
         } catch (Exception e) {
             logger.error("❌ Error while preloading movie candidates", e);
         }
 
-        logger.info("🎯 Finished preloading {} movie candidates and their embeddings.", candidateEmbeddings.size());
+        logger.info("✅ Finished preloading {} movie candidates and their embeddings.", candidateEmbeddings.size());
     }
+
 
     @EventListener(ApplicationReadyEvent.class)
     public void onApplicationFullyReady() {
         logger.info("✅ RecommendationService and initial movies are fully ready.");
     }
 
-    public List<Movie> getCandidateMovies() {
-        return new ArrayList<>(candidates);
-    }
+
 
     public Map<String, float[]> getCandidateEmbeddings() {
         return candidateEmbeddings;
@@ -171,16 +158,15 @@ public class RecommendationService {
         }
     }
 
-    public List<Movie> findMostSimilarMovies(float[] userVector, List<Movie> candidateMovies, int topN) {
+    public List<MovieDTO> findMostSimilarMovies(float[] userVector, List<MovieDTO> candidateMovies, int topN) {
         if (userVector == null || userVector.length == 0) {
             throw new IllegalArgumentException("User embedding is missing");
         }
 
-        List<Map.Entry<Movie, Double>> scored = new ArrayList<>();
+        List<Map.Entry<MovieDTO, Double>> scored = new ArrayList<>();
 
-        for (Movie movie : candidateMovies) {
+        for (MovieDTO movie : candidateMovies) {
             float[] vector = embeddingStorageService.getEmbedding(movie.getId());
-            // ודא שגודל הוקטור תואם לוקטור המשתמש (כעת 768)
             if (vector != null && vector.length == userVector.length) {
                 double similarity = EmbeddingUtils.cosineSimilarity(userVector, vector);
                 scored.add(Map.entry(movie, similarity));
@@ -195,7 +181,7 @@ public class RecommendationService {
                 .collect(Collectors.toList());
     }
 
-    public List<Movie> getRecommendationsFromSimilarUsers(User user, int topUsers) {
+    public List<MovieDTO> getRecommendationsFromSimilarUsers(User user, int topUsers) {
         List<Map<String, Object>> similarUsers = userSimilarityService.findUsersWithSimilarTaste(user, topUsers);
         Map<String, Integer> movieFrequency = new HashMap<>();
 
@@ -218,5 +204,9 @@ public class RecommendationService {
                 .collect(Collectors.toList());
 
         return tmdbService.updateMovieListWithDifferences(user.getRecommendedMovies(), topTitles);
+    }
+
+    public List<MovieDTO> getCandidateMovies() {
+        return candidates;
     }
 }

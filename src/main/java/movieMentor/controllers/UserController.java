@@ -1,7 +1,7 @@
 package movieMentor.controllers;
 
 import lombok.RequiredArgsConstructor;
-import movieMentor.dto.MovieDTO;
+import movieMentor.beans.MovieDTO;
 import movieMentor.services.UserService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -9,7 +9,9 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
 
+import java.util.Collections;
 import java.util.List;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/user")
@@ -45,11 +47,27 @@ public class UserController {
         return ResponseEntity.ok("✅ רשימת ההמלצות עודכנה");
     }
 
-    @GetMapping("/recommendations")
-    public ResponseEntity<List<MovieDTO>> getRecommendations(Authentication auth) {
-        return ResponseEntity.ok(userService.getRecommendations(auth.getName()));
-    }
+//    @GetMapping("/recommendations")
+//    public ResponseEntity<List<MovieDTO>> getRecommendations(Authentication auth) {
+//        return ResponseEntity.ok(userService.getRecommendations(auth.getName()));
+//    }
+@GetMapping("/recommendations")
+public ResponseEntity<List<MovieDTO>> getRecommendations(Authentication auth) {
+    String username = auth.getName();
+    log.info("🎯 getRecommendations called for user: {}", username);
 
+    try {
+        List<MovieDTO> recommendations = userService.getRecommendations(username);
+        log.info("📊 Found {} recommendations for user {}: {}",
+                recommendations.size(), username,
+                recommendations.stream().map(MovieDTO::getTitle).collect(Collectors.toList()));
+
+        return ResponseEntity.ok(recommendations);
+    } catch (Exception e) {
+        log.error("❌ Error fetching recommendations for user {}: {}", username, e.getMessage(), e);
+        return ResponseEntity.status(500).body(Collections.emptyList());
+    }
+}
     @GetMapping("/favorites")
     public ResponseEntity<List<MovieDTO>> getFavorites(Authentication auth){
         return ResponseEntity.ok(userService.getFavorites(auth.getName()));

@@ -3,11 +3,11 @@ package movieMentor.services;
 import movieMentor.beans.Actor;
 import movieMentor.beans.Genre;
 import movieMentor.beans.Movie;
-import movieMentor.dto.MovieDTO;
+import movieMentor.beans.MovieDTO;
 import movieMentor.models.MovieImage;
+import org.springframework.cache.annotation.Cacheable;
 
 import java.util.List;
-import java.util.Optional;
 import java.util.Set;
 
 public interface TmdbService {
@@ -22,6 +22,8 @@ public interface TmdbService {
 
 //    List<MovieDTO> searchMoviesDtos(String query);
 
+    List<Movie> searchMoviesDTO(String query);
+
     /**
      * Get or create a movie by its title.
      * If the movie is not in the database, fetch it from TMDB and save it with its actors.
@@ -32,23 +34,27 @@ public interface TmdbService {
     Movie getOrCreateMovie(String title);
 
 
-    Movie getOrCreateMovieById(long id);
+    MovieDTO getOrCreateMovieDTO(String title);
 
     /**
      * Fetch a list of now playing movies in Israel region.
      *
      * @return a list of now playing movies
      */
-    List<Movie> getNowPlayingMovies();
 
-    List<Movie> getUpComingMovies();
+    List<MovieDTO> getNowPlayingMoviesDTO();
+
 
     /**
      * Fetch a list of top rated movies from TMDB.
      *
      * @return a list of top rated movies
      */
-    List<Movie> getTopRatedMovies();
+
+    List<MovieDTO> getTopRatedMoviesDTO();
+
+    @Cacheable(value = "upcomingMoviesDTO", unless = "#result == null or #result.isEmpty()")
+    List<MovieDTO> getUpcomingMoviesDTO();
 
     /**
      * Update a user's recommended movies by replacing only the changed ones.
@@ -57,7 +63,7 @@ public interface TmdbService {
      * @param newTitles the updated list of movie titles from recommendation
      * @return a new updated list of Movie entities
      */
-    List<Movie> updateMovieListWithDifferences(List<Movie> oldList, List<String> newTitles);
+    List<MovieDTO> updateMovieListWithDifferences(List<MovieDTO> oldList, List<String> newTitles);
 
     /**
      * Fetch the trailer YouTube embed link of a given TMDB movie ID.
@@ -85,6 +91,6 @@ public interface TmdbService {
     List<Actor> getActorsForMovie(Long movieId);
      Set<Genre> resolveGenres(List<Integer> genreIds);
 
-    List<Movie> getMoviesByGenre(int genreId,int page);
-
+    @Cacheable(value = "moviesByGenreDTO", key = "#genreId + '-' + #page", unless = "#result == null or #result.isEmpty()")
+    List<MovieDTO> getMoviesByGenreDTO(int genreId, int page);
 }

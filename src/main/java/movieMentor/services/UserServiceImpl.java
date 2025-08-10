@@ -3,16 +3,20 @@ package movieMentor.services;
 import lombok.RequiredArgsConstructor;
 import movieMentor.beans.Movie;
 import movieMentor.beans.User;
-import movieMentor.dto.MovieDTO;
-import movieMentor.repository.MovieRepository;
+import movieMentor.beans.MovieDTO;
+import movieMentor.repository.MovieDtoRepository;
 import movieMentor.repository.UserRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
+import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Duration;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -145,7 +149,7 @@ public class UserServiceImpl implements UserService {
 
     @Override
     @Transactional(readOnly = true)
-    @Cacheable(cacheNames = "userRecs", key = "#username")
+    @Cacheable(cacheNames = "userRecommendations", key = "#username", unless = "#result == null || #result.isEmpty()")
     public List<MovieDTO> getRecommendations(String username) {
         User u = userRepository.findByUsername(username)
                 .orElseThrow(() -> new IllegalArgumentException("User not found"));
@@ -178,44 +182,110 @@ public class UserServiceImpl implements UserService {
     @CacheEvict(value = "userRecommendations", key = "#username")
     public void setRecommendedMovies(String username, List<String> recommendedTitles) {
         User user = fetchUser(username);
-        List<Movie> updated = tmdbService.updateMovieListWithDifferences(user.getRecommendedMovies(), recommendedTitles);
+        List<MovieDTO> updated = tmdbService.updateMovieListWithDifferences(user.getRecommendedMovies(), recommendedTitles);
         user.setRecommendedMovies(updated);
         userRepository.saveAndFlush(user);
         logger.info("🛠️ Manually updated recommended movies for '{}'", username);
     }
+//
+//    @Override
+//    @Transactional
+//    @CacheEvict(value = "userRecommendations", key = "#username")
+//    public void updateRecommendations(User user) {
+//        float[] userVector = buildUserProfileEmbeddingWeighted(user);
+//        if (userVector.length == 0) {
+//            logger.warn("⚠️ User '{}' has no embedding data – skipping vector-based recommendations", user.getUsername());
+//        }
+//        List<MovieDTO> candidateMovies = recommendationService.getCandidateMovies();
+//        List<MovieDTO> similarMovies = new ArrayList<>();
+//        if (userVector.length > 0) {
+//            similarMovies = recommendationService.findMostSimilarMovies(userVector, candidateMovies, 10);
+//            logger.info("🎯 Found {} vector-based similar movies for '{}'", similarMovies.size(), user.getUsername());
+//        }
+//
+//        List<String> newTitles = recommendationService.generateRecommendations(user);
+//        List<MovieDTO> updatedGptList = tmdbService.updateMovieListWithDifferences(user.getRecommendedMovies(), newTitles);
+//        List<MovieDTO> similarTasteMovies = recommendationService.getRecommendationsFromSimilarUsers(user, 5);
+//        // 5. מיזוג חכם (למשל, לשלב או להעדיף אחד מהמקורות)
+//        Set<MovieDTO> finalRecommendations = new LinkedHashSet<>();
+//        logger.info(" similar movies based on vector embedding '{}'", similarMovies.stream().map(MovieDTO::getTitle).collect(Collectors.toList()));
+//        finalRecommendations.addAll(similarMovies);
+//        logger.info(" similar movies based on chat GPT '{}'", updatedGptList.stream().map(MovieDTO::getTitle).collect(Collectors.toList()));
+//        finalRecommendations.addAll(updatedGptList);
+//        logger.info(" similar movies based on other users '{}'", similarTasteMovies.stream().map(MovieDTO::getTitle).collect(Collectors.toList()));
+//        finalRecommendations.addAll(similarTasteMovies);
+//        // 6. עדכון המשתמש ושמירה
+//        user.setRecommendedMovies(new ArrayList<>(finalRecommendations));
+//        userRepository.saveAndFlush(user);
+//        logger.info(" user recommendations '{}'", finalRecommendations.stream().map(MovieDTO::getTitle).collect(Collectors.toList()));
+//        logger.info("✅ Updated recommended movies for '{}'", user.getUsername());
+//
+//    }
+
 
     @Override
-    @Transactional
-    @CacheEvict(value = "userRecommendations", key = "#username")
-    public void updateRecommendations(User user) {
-        float[] userVector = buildUserProfileEmbeddingWeighted(user);
-        if (userVector.length == 0) {
-            logger.warn("⚠️ User '{}' has no embedding data – skipping vector-based recommendations", user.getUsername());
-        }
-        List<Movie> candidateMovies = recommendationService.getCandidateMovies();
-        List<Movie> similarMovies = new ArrayList<>();
-        if (userVector.length > 0) {
-            similarMovies = recommendationService.findMostSimilarMovies(userVector, candidateMovies, 10);
-            logger.info("🎯 Found {} vector-based similar movies for '{}'", similarMovies.size(), user.getUsername());
-        }
+@Transactional
+@CacheEvict(cacheNames = "userRecommendations", key = "#user.username")
+public void updateRecommendations(User user) {
+    final String username = user.getUsername();
 
-        List<String> newTitles = recommendationService.generateRecommendations(user);
-        List<Movie> updatedGptList = tmdbService.updateMovieListWithDifferences(user.getRecommendedMovies(), newTitles);
-        List<Movie> similarTasteMovies = recommendationService.getRecommendationsFromSimilarUsers(user, 5);
-        // 5. מיזוג חכם (למשל, לשלב או להעדיף אחד מהמקורות)
-        Set<Movie> finalRecommendations = new LinkedHashSet<>();
-        logger.info(" similar movies based on vector embedding '{}'", similarMovies.stream().map(Movie::getTitle).collect(Collectors.toList()));
-        finalRecommendations.addAll(similarMovies);
-        logger.info(" similar movies based on chat GPT '{}'", updatedGptList.stream().map(Movie::getTitle).collect(Collectors.toList()));
-        finalRecommendations.addAll(updatedGptList);
-        logger.info(" similar movies based on other users '{}'", similarTasteMovies.stream().map(Movie::getTitle).collect(Collectors.toList()));
-        finalRecommendations.addAll(similarTasteMovies);
-        // 6. עדכון המשתמש ושמירה
-        user.setRecommendedMovies(new ArrayList<>(finalRecommendations));
-        userRepository.saveAndFlush(user);
-        logger.info(" user recommendations '{}'", finalRecommendations.stream().map(Movie::getTitle).collect(Collectors.toList()));
-        logger.info("✅ Updated recommended movies for '{}'", user.getUsername());
+    // 1) וקטור פרופיל משתמש
+    float[] userVector = buildUserProfileEmbeddingWeighted(user);
+    if (userVector == null || userVector.length == 0) {
+        logger.warn("⚠️ User '{}' has no embedding data – skipping vector-based recommendations", username);
+    }
 
+    // 2) מועמדים + דימיון וקטורי (אופציונלי)
+    List<MovieDTO> candidateMovies = recommendationService.getCandidateMovies();
+    List<MovieDTO> similarMovies = Collections.emptyList();
+    if (userVector != null && userVector.length > 0) {
+        similarMovies = recommendationService.findMostSimilarMovies(userVector, candidateMovies, 10);
+        logger.info("🎯 Found {} vector-based similar movies for '{}'", similarMovies.size(), username);
+    }
+
+    // 3) GPT titles -> עדכון לרשימת DTO (שומר שדות מלאים)
+    List<String> newTitles = recommendationService.generateRecommendations(user);
+    List<MovieDTO> updatedGptList =
+            tmdbService.updateMovieListWithDifferences(user.getRecommendedMovies(), newTitles);
+
+    // 4) משתמשים דומים
+    List<MovieDTO> similarTasteMovies = recommendationService.getRecommendationsFromSimilarUsers(user, 5);
+
+    // 5) מיזוג חכם: שומר סדר, מסיר כפילויות לפי id ואח"כ title
+    LinkedHashMap<String, MovieDTO> merged = new LinkedHashMap<>();
+    java.util.function.Consumer<MovieDTO> add = m -> {
+        if (m == null) return;
+        String key = dedupeKey(m);
+        if (key != null && !merged.containsKey(key)) merged.put(key, m);
+    };
+
+    similarMovies.forEach(add);        // עדיפות 1
+    updatedGptList.forEach(add);       // עדיפות 2
+    similarTasteMovies.forEach(add);   // עדיפות 3
+
+    // 6) חיתוך לאורך סביר
+    final int MAX_RECS = 30;
+    List<MovieDTO> finalRecommendations = merged.values()
+            .stream()
+            .limit(MAX_RECS)
+            .collect(java.util.stream.Collectors.toList());
+
+    // 7) עדכון ה-DB (ElementCollection עם OrderColumn ישמור את הסדר)
+    user.getRecommendedMovies().clear();
+    user.getRecommendedMovies().addAll(finalRecommendations);
+    userRepository.saveAndFlush(user);
+
+    logger.info("✅ Updated {} recommendations for '{}': {}",
+            finalRecommendations.size(),
+            username,
+            finalRecommendations.stream().map(MovieDTO::getTitle).collect(java.util.stream.Collectors.toList()));
+}
+
+    // עוזר לדה-דופליקציה: קודם לפי id, אחרת לפי title מנורמל
+    private String dedupeKey(MovieDTO m) {
+        if (m.getId() != null) return "id:" + m.getId();
+        if (m.getTitle() != null) return "t:" + m.getTitle().trim().toLowerCase(java.util.Locale.ROOT);
+        return null;
     }
 
     private User fetchUser(String username) {

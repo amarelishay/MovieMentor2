@@ -60,5 +60,5 @@ public class User {
             inverseJoinColumns = @JoinColumn(name = "movie_id")
     )
     @OrderColumn(name = "recommendation_order")
-    private List<Movie> recommendedMovies = new ArrayList<>();
+    private List<MovieDTO> recommendedMovies = new ArrayList<>();
 }

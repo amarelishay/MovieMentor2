@@ -2,7 +2,7 @@ package movieMentor.services;
 
 import movieMentor.beans.Movie;
 import movieMentor.beans.User;
-import movieMentor.dto.MovieDTO;
+import movieMentor.beans.MovieDTO;
 
 import java.util.List;
 
