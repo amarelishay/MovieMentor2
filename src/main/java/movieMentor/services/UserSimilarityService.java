@@ -2,9 +2,11 @@ package movieMentor.services;
 
 import lombok.RequiredArgsConstructor;
 import movieMentor.beans.Movie;
+import movieMentor.beans.MovieDTO;
 import movieMentor.beans.User;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.*;
@@ -14,7 +16,8 @@ import java.util.*;
 public class UserSimilarityService {
 
     private static final Logger logger = LoggerFactory.getLogger(UserSimilarityService.class);
-
+    @Autowired
+    private com.fasterxml.jackson.databind.ObjectMapper objectMapper;
     private final EmbeddingStorageService embeddingStorageService;
     private final UserVectorClientService userVectorClientService;
 
@@ -48,17 +51,28 @@ public class UserSimilarityService {
             }
         }
 
-        List<Movie> history = user.getWatchHistory();
-        int start = Math.max(0, history.size() - HISTORY_LIMIT);
-        List<Movie> recentHistory = history.subList(start, history.size());
 
-        for (Movie movie : recentHistory) {
-            float[] vector = embeddingStorageService.getEmbedding(movie.getId());
-            if (vector != null && vector.length > 0) {
-                vectors.add(vector);
-                weights.add(HISTORY_WEIGHT);
+
+// ...
+
+        List<String> snapshots = Optional.ofNullable(user.getWatchHistoryJson())
+                .orElseGet(Collections::emptyList);
+        int size = snapshots.size();
+        int start = Math.max(0, size - HISTORY_LIMIT);
+
+        for (int i = start; i < size; i++) {
+            try {
+                MovieDTO dto = objectMapper.readValue(snapshots.get(i), MovieDTO.class);
+                float[] vector = embeddingStorageService.getEmbedding(dto.getId());
+                if (vector != null && vector.length > 0) {
+                    vectors.add(vector);
+                    weights.add(HISTORY_WEIGHT);
+                }
+            } catch (Exception e) {
+                logger.warn("Failed to parse history JSON for user '{}': {}", user.getUsername(), e.getMessage());
             }
         }
+
 
         if (vectors.isEmpty()) {
             logger.warn("⚠️ No valid embeddings found for user '{}'", user.getUsername());

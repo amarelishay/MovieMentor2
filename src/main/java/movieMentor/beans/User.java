@@ -35,7 +35,10 @@ public class User {
     private String username;
 
     private String password;
+
     private LocalDate birthDate;
+
+    // רשימת סרטים מועדפים
     @Fetch(FetchMode.SUBSELECT)
     @ManyToMany(fetch = FetchType.LAZY)
     @JoinTable(
@@ -44,14 +47,16 @@ public class User {
             inverseJoinColumns = @JoinColumn(name = "movie_id")
     )
     private List<Movie> favoriteMovies = new ArrayList<>();
-    @Fetch(FetchMode.SUBSELECT)
-    @ManyToMany(fetch = FetchType.LAZY)
-    @JoinTable(
-            name = "user_watch_history",
-            joinColumns = @JoinColumn(name = "user_id"),
-            inverseJoinColumns = @JoinColumn(name = "movie_id")
-    )
-    private List<Movie> watchHistory = new ArrayList<>();
+
+    // היסטוריית צפייה בפורמט JSON
+    @ElementCollection
+    @CollectionTable(name = "user_watch_history", joinColumns = @JoinColumn(name = "user_id"))
+    @Column(name = "history_entry", columnDefinition = "LONGTEXT")
+    private List<String> watchHistoryJson = new ArrayList<>();
+
+
+
+    // המלצות סרטים למשתמש
     @Fetch(FetchMode.SUBSELECT)
     @ManyToMany(fetch = FetchType.LAZY)
     @JoinTable(

@@ -37,21 +37,39 @@ public class RecommendationService {
     private final MovieRepository movieRepository;
     private final Map<String, float[]> candidateEmbeddings = new HashMap<>();
     private final List<MovieDTO> candidates = new ArrayList<>();
+    private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
+
     @Autowired
     private CacheManager cacheManager;
 
     public List<String> generateRecommendations(User user) {
+        // כותרות מהמועדפים
         List<String> favoriteTitles = user.getFavoriteMovies().stream()
                 .map(Movie::getTitle)
+                .filter(Objects::nonNull)
+                .distinct()
                 .collect(Collectors.toList());
 
-        List<String> historyTitles = user.getWatchHistory().stream()
-                .skip(Math.max(0, user.getWatchHistory().size() - 30))
-                .map(Movie::getTitle)
-                .collect(Collectors.toList());
+        // 30 אחרונים מהיסטוריה (JSON -> MovieDTO -> title)
+        List<String> historyTitles = Collections.emptyList();
+        List<String> history = user.getWatchHistoryJson();
+        if (history != null && !history.isEmpty()) {
+            int from = Math.max(0, history.size() - 30);
+            historyTitles = history.subList(from, history.size()).stream()
+                    .map(json -> {
+                        try {
+                            MovieDTO dto = objectMapper.readValue(json, MovieDTO.class);
+                            return dto.getTitle();
+                        } catch (Exception e) {
+                            return null; // מדלגים על רשומה פגומה
+                        }
+                    })
+                    .filter(Objects::nonNull)
+                    .distinct()
+                    .collect(Collectors.toList());
+        }
 
         return openAiService.getRecommendations(favoriteTitles, historyTitles);
-
     }
 @PostConstruct
     public void initMovieCandidates() {

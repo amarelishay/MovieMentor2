@@ -4,19 +4,14 @@ import lombok.RequiredArgsConstructor;
 import movieMentor.beans.Movie;
 import movieMentor.beans.User;
 import movieMentor.beans.MovieDTO;
-import movieMentor.repository.MovieDtoRepository;
 import movieMentor.repository.UserRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
-import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.Duration;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -33,6 +28,7 @@ public class UserServiceImpl implements UserService {
     private final EmbeddingService embeddingService;
     private final EmbeddingStorageService embeddingStorageService;
     private final UserVectorClientService userVectorClient;
+    private final com.fasterxml.jackson.databind.ObjectMapper objectMapper;
 
     @Override
     @Transactional
@@ -65,58 +61,108 @@ public class UserServiceImpl implements UserService {
             updateUserContextInVectorDB(user);  // ← עדכון FAISS
         }
     }
-
     @Override
     @Transactional
-    @CacheEvict(value = "userRecommendations", key = "#username")
+    @CacheEvict(value = {"userRecommendations", "userHistory"}, key = "#username")
     public void addToWatchHistory(String username, String movieTitle) {
         User user = fetchUser(username);
-        Movie movie = tmdbService.getOrCreateMovie(movieTitle);
-        boolean added = user.getWatchHistory().add(movie);
 
-        if (added) {
-            logger.info("🎬 Added '{}' to watch history of '{}'", movieTitle, username);
-            if (!embeddingStorageService.hasEmbedding(movie.getId())) {
-                float[] vector = embeddingService.getEmbedding(movie.getOverview());
-                embeddingStorageService.addEmbedding(movie.getId(), vector);
+        // משיגים צילום מצב כ-DTO (לא ישות JPA)
+        MovieDTO dto = tmdbService.getOrCreateMovieDTO(movieTitle);
+        if (dto == null) {
+            logger.warn("⚠️ Could not resolve MovieDTO for title '{}'", movieTitle);
+            return;
+        }
+
+        // המרה ל-JSON ושמירה ב-ElementCollection
+        try {
+            String json = objectMapper.writeValueAsString(dto);
+
+            // דה-דופליקציה קלה: אל תוסיף אם האחרון זהה (אופציונלי אך שימושי)
+            List<String> history = user.getWatchHistoryJson();
+            if (history.isEmpty() || !history.get(history.size() - 1).equals(json)) {
+                history.add(json);
             }
-            if (user.getWatchHistory().size() % 5 == 0) {
-                logger.info("📊 Triggering recommendation update — history count divisible by 5");
-                updateRecommendations(user);
+
+            // שמירת אורך מקסימלי (אופציונלי)
+            final int LIMIT = 200;
+            if (history.size() > LIMIT) {
+                history.subList(0, history.size() - LIMIT).clear();
+            }
+
+            userRepository.save(user);
+            logger.info("🎬 Added '{}' to watch history (JSON) of '{}'", movieTitle, username);
+
+        } catch (Exception e) {
+            logger.warn("Failed to serialize MovieDTO for history of '{}': {}", username, e.getMessage());
+        }
+
+        // דואגים ל-embedding של הסרט (ע”פ ה-ID של ה-DTO)
+        if (dto.getId() != null && !embeddingStorageService.hasEmbedding(dto.getId())) {
+            String overview = dto.getOverview() != null ? dto.getOverview() : "";
+            float[] vector = embeddingService.getEmbedding(overview);
+            if (vector != null && vector.length > 0) {
+                embeddingStorageService.addEmbedding(dto.getId(), vector);
             }
         }
-        updateUserContextInVectorDB(user);  // ← עדכון FAISS
 
+        // מריצים עדכון המלצות כל 5 הוספות (כמו קודם)
+        if (user.getWatchHistoryJson().size() % 5 == 0) {
+            logger.info("📊 Triggering recommendation update — history count divisible by 5");
+            updateRecommendations(user);
+        }
+
+        // עדכון וקטור המשתמש ב-Vector DB
+        updateUserContextInVectorDB(user);
     }
+
     private float[] buildUserProfileEmbeddingWeighted(User user) {
-        // הגדרת המשקלים
+        // משקלים
         final float FAVORITE_WEIGHT = 2.0f;
-        final float HISTORY_WEIGHT = 1.0f;
-        final int HISTORY_LIMIT = 30;
+        final float HISTORY_WEIGHT  = 1.0f;
+        final int   HISTORY_LIMIT   = 30;
 
         List<float[]> vectors = new ArrayList<>();
-        List<Float> weights = new ArrayList<>();
+        List<Float>   weights = new ArrayList<>();
 
-        // מועדפים
+        // 1) מועדפים (Movie ישויות)
         for (Movie movie : user.getFavoriteMovies()) {
-            float[] vector = embeddingStorageService.getEmbedding(movie.getId());
-            if (vector != null && vector.length > 0) {
-                vectors.add(vector);
+            if (movie == null || movie.getId() == null) continue;
+            float[] vec = embeddingStorageService.getEmbedding(movie.getId());
+            if (vec != null && vec.length > 0) {
+                vectors.add(vec);
                 weights.add(FAVORITE_WEIGHT);
             }
-
         }
 
-        // היסטוריית צפייה – רק 30 אחרונים
-        List<Movie> history = user.getWatchHistory();
-        int start = Math.max(0, history.size() - HISTORY_LIMIT);
-        List<Movie> recentHistory = history.subList(start, history.size());
+        // 2) היסטוריית צפייה (JSON -> MovieDTO) – 30 אחרונים
+        List<String> snapshots = user.getWatchHistoryJson();
+        if (snapshots != null && !snapshots.isEmpty()) {
+            int from = Math.max(0, snapshots.size() - HISTORY_LIMIT);
+            for (int i = from; i < snapshots.size(); i++) {
+                String json = snapshots.get(i);
+                if (json == null || json.isEmpty()) continue;
 
-        for (Movie movie : recentHistory) {
-            float[] vector = embeddingStorageService.getEmbedding(movie.getId());
-            if (vector != null && vector.length > 0) {
-                vectors.add(vector);
-                weights.add(HISTORY_WEIGHT);
+                try {
+                    MovieDTO dto = objectMapper.readValue(json, MovieDTO.class);
+                    if (dto == null || dto.getId() == null) continue;
+
+                    float[] vec = embeddingStorageService.getEmbedding(dto.getId());
+                    if (vec == null || vec.length == 0) {
+                        String overview = dto.getOverview() != null ? dto.getOverview() : "";
+                        vec = embeddingService.getEmbedding(overview);
+                        if (vec != null && vec.length > 0) {
+                            embeddingStorageService.addEmbedding(dto.getId(), vec);
+                        }
+                    }
+
+                    if (vec != null && vec.length > 0) {
+                        vectors.add(vec);
+                        weights.add(HISTORY_WEIGHT);
+                    }
+                } catch (Exception ignore) {
+                    // דלג על רשומה פגומה
+                }
             }
         }
 
@@ -125,22 +171,30 @@ public class UserServiceImpl implements UserService {
             return new float[0];
         }
 
+        // 3) ממוצע משוקלל
         int dim = vectors.get(0).length;
         float[] weightedSum = new float[dim];
-        float totalWeight = 0;
+        float totalWeight = 0f;
 
-        for (int v = 0; v < vectors.size(); v++) {
-            float[] vec = vectors.get(v);
-            float weight = weights.get(v);
-            totalWeight += weight;
+        for (int idx = 0; idx < vectors.size(); idx++) {
+            float[] vec = vectors.get(idx);
+            // הגנה ממדדים לא תואמים (אם יש)
+            if (vec.length != dim) continue;
 
-            for (int i = 0; i < dim; i++) {
-                weightedSum[i] += vec[i] * weight;
+            float w = weights.get(idx);
+            totalWeight += w;
+            for (int d = 0; d < dim; d++) {
+                weightedSum[d] += vec[d] * w;
             }
         }
 
-        for (int i = 0; i < dim; i++) {
-            weightedSum[i] /= totalWeight;
+        if (totalWeight == 0f) {
+            logger.warn("⚠️ Total weight is zero for user '{}'", user.getUsername());
+            return new float[0];
+        }
+
+        for (int d = 0; d < dim; d++) {
+            weightedSum[d] /= totalWeight;
         }
 
         logger.info("✅ Built weighted profile embedding for '{}'", user.getUsername());
@@ -173,9 +227,23 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
-    public List<Movie> getHistory(String username) {
-        return fetchUser(username).getWatchHistory();
+    public List<MovieDTO> getHistoryDTO(String username) {
+        User user = fetchUser(username);
+        List<MovieDTO> history = new ArrayList<>();
+
+        for (String json : user.getWatchHistoryJson()) {
+            if (json == null || json.isEmpty()) continue;
+            try {
+                MovieDTO dto = objectMapper.readValue(json, MovieDTO.class);
+                history.add(dto);
+            } catch (Exception e) {
+                logger.warn("⚠️ Failed to parse watch history entry for user '{}': {}", username, e.getMessage());
+            }
+        }
+
+        return history;
     }
+
 
     @Override
     @Transactional
@@ -294,35 +362,62 @@ public void updateRecommendations(User user) {
     }
 
     private void updateUserContextInVectorDB(User user) {
-        // ודא שכל הסרטים במועדפים/היסטוריה מכילים embedding
-        List<Movie> allMovies = new ArrayList<>();
-        allMovies.addAll(user.getFavoriteMovies());
-        allMovies.addAll(user.getWatchHistory());
+        // 1) אוספים DTOs: מועדפים (Movie -> MovieDTO) + היסטוריה (JSON -> MovieDTO)
+        List<MovieDTO> allMovies = new ArrayList<>();
 
-        for (Movie movie : allMovies) {
+        if (user.getFavoriteMovies() != null && !user.getFavoriteMovies().isEmpty()) {
+            allMovies.addAll(
+                    user.getFavoriteMovies().stream()
+                            .filter(Objects::nonNull)
+                            .map(MovieDTO::new)
+                            .collect(Collectors.toList())
+            );
+        }
+
+        List<String> snapshots = Optional.ofNullable(user.getWatchHistoryJson())
+                .orElseGet(Collections::emptyList);
+
+        for (String json : snapshots) {
+            if (json == null || json.isEmpty()) continue;
+            try {
+                MovieDTO dto = objectMapper.readValue(json, MovieDTO.class);
+                if (dto != null) {
+                    allMovies.add(dto);
+                }
+            } catch (Exception e) {
+                logger.warn("Failed to deserialize MovieDTO for '{}': {}", user.getUsername(), e.getMessage());
+            }
+        }
+
+        // 2) ודא שקיים embedding לכל סרט (לפי id)
+        for (MovieDTO movie : allMovies) {
+            if (movie == null || movie.getId() == null) continue;
+
             if (!embeddingStorageService.hasEmbedding(movie.getId())) {
-                float[] vector = embeddingService.getEmbedding(movie.getOverview());
-                if (vector.length > 0) {
+                String text = movie.getOverview() != null ? movie.getOverview() : "";
+                float[] vector = embeddingService.getEmbedding(text);
+                if (vector != null && vector.length > 0) {
                     embeddingStorageService.addEmbedding(movie.getId(), vector);
-              
                 }
             }
         }
 
+        // 3) מחשבים וקטור משתמש
         float[] userVector = buildUserProfileEmbeddingWeighted(user);
-
-        if (userVector.length == 0) {
+        if (userVector == null || userVector.length == 0) {
             logger.warn("⛔ User '{}' has empty vector – skipping FAISS update", user.getUsername());
             return;
         }
 
+        // 4) שולחים ל-Vector DB עם מטא־דאטה
         Map<String, Object> metadata = new HashMap<>();
-        metadata.put("favorite_count", user.getFavoriteMovies().size());
-        metadata.put("watch_history_count", user.getWatchHistory().size());
+        metadata.put("favorite_count", user.getFavoriteMovies() != null ? user.getFavoriteMovies().size() : 0);
+        metadata.put("watch_history_count", snapshots.size());
         metadata.put("username", user.getUsername());
 
-        userVectorClient.storeUserVector(user.getId().toString(), userVector, metadata);
+        userVectorClient.storeUserVector(String.valueOf(user.getId()), userVector, metadata);
     }
+
     public List<Map<String, Object>> findUsersWithSimilarTaste(User user, int topK) {
         float[] userVector = buildUserProfileEmbeddingWeighted(user);
         if (userVector.length == 0) {

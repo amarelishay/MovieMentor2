@@ -392,7 +392,6 @@ public class TmdbServiceImpl implements TmdbService {
     public Set<Genre> resolveGenres(List<Integer> genreIds) {
         if (genreIds==null||genreIds.isEmpty())
         {
-            logger.info("empty SET");
             return Collections.EMPTY_SET;
         }
         Set<Genre> genres = new HashSet<>();
