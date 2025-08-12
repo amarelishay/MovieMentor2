@@ -23,6 +23,7 @@ public class MovieDTO implements Serializable {
     @Id
     private Long id;
     private String title;
+    @Column(name = "poster_url", columnDefinition = "TEXT")
     private String posterUrl;
     private Double voteAverage;
     @Column(columnDefinition = "TEXT",length = 2000)

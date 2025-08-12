@@ -32,7 +32,7 @@ public class Movie implements Serializable {
     private String originalTitle;
     @Column(columnDefinition = "TEXT",length = 2000)
     private String overview;
-
+    @Column(name = "poster_url", columnDefinition = "TEXT")
     private String posterUrl;
 
     private LocalDate releaseDate;
