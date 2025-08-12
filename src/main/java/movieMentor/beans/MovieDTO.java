@@ -1,12 +1,14 @@
 package movieMentor.beans;
 
 import lombok.AllArgsConstructor;
+import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import movieMentor.models.TmdbMovie;
 
 import javax.persistence.*;
 import java.io.Serializable;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -16,6 +18,7 @@ import java.util.stream.Collectors;
 @Table(name = "movie_dto_cache")
 @Entity
 @Embeddable
+@Builder
 public class MovieDTO implements Serializable {
     @Id
     private Long id;
@@ -28,7 +31,7 @@ public class MovieDTO implements Serializable {
     public MovieDTO(MovieDTO movie) {
         this.id = movie.getId();
         this.title = movie.getTitle();
-        this.posterUrl = movie.getPosterUrl();
+        setPosterUrl(movie.getPosterUrl());
         this.voteAverage = movie.getVoteAverage();
     }
 
@@ -44,13 +47,29 @@ public class MovieDTO implements Serializable {
     }
 
     public static List<MovieDTO> movieListToDtoList(List<Movie> movies) {
-        return movies.stream()
-                .map(movie -> new MovieDTO(movie.getId(), movie.getTitle(), movie.getPosterUrl(), movie.getVoteAverage(), movie.getOverview())).collect(Collectors.toList());
+        List<MovieDTO> movieDTOS= new ArrayList<>();
+        for (Movie movie:movies) {
+            MovieDTO movieDTO=MovieDTO.builder().id(movie.getId())
+                    .overview(movie.getOverview())
+                    .title(movie.getTitle())
+                    .build();
+            movieDTO.setPosterUrl(movie.getPosterUrl());
+            movieDTOS.add(movieDTO);
+        }
+        return movieDTOS;
     }
 
     public static List<MovieDTO> TMDBmovieListToDtoList(List<TmdbMovie> movies) {
-        return movies.stream()
-                .map(movie -> new MovieDTO(movie.getId(), movie.getTitle(), movie.getPosterPath(), movie.getVoteAverage(), movie.getOverview())).collect(Collectors.toList());
+        List<MovieDTO> movieDTOS= new ArrayList<>();
+        for (TmdbMovie movie:movies) {
+            MovieDTO movieDTO=MovieDTO.builder().id(movie.getId())
+                    .overview(movie.getOverview())
+                    .title(movie.getTitle())
+                    .build();
+            movieDTO.setPosterUrl(movie.getPosterPath());
+            movieDTOS.add(movieDTO);
+        }
+        return movieDTOS;
     }
 
     public void setPosterUrl(String path) {
