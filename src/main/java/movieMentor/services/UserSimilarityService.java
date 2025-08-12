@@ -2,7 +2,9 @@ package movieMentor.services;
 
 import lombok.RequiredArgsConstructor;
 import movieMentor.beans.Movie;
+import movieMentor.beans.MovieDTO;
 import movieMentor.beans.User;
+import movieMentor.beans.UserWatchEntry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
@@ -48,11 +50,11 @@ public class UserSimilarityService {
             }
         }
 
-        List<Movie> history = user.getWatchHistory();
+        List<UserWatchEntry> history = user.getWatchHistory();
         int start = Math.max(0, history.size() - HISTORY_LIMIT);
-        List<Movie> recentHistory = history.subList(start, history.size());
+        List<UserWatchEntry> recentHistory = history.subList(start, history.size());
 
-        for (Movie movie : recentHistory) {
+        for (UserWatchEntry movie : recentHistory) {
             float[] vector = embeddingStorageService.getEmbedding(movie.getId());
             if (vector != null && vector.length > 0) {
                 vectors.add(vector);

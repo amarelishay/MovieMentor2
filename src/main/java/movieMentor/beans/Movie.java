@@ -6,6 +6,7 @@
 
 package movieMentor.beans;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.annotation.JsonIgnore;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import lombok.*;
@@ -34,8 +35,9 @@ public class Movie implements Serializable {
     private String overview;
 
     private String posterUrl;
-
+    @JsonFormat(pattern = "yyyy-MM-dd")
     private LocalDate releaseDate;
+
 
     private Double popularity;
 

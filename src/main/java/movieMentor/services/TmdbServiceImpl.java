@@ -14,12 +14,14 @@ import movieMentor.repository.ActorRepository;
 import movieMentor.repository.GenreRepository;
 import movieMentor.repository.MovieDtoRepository;
 import movieMentor.repository.MovieRepository;
+import org.hibernate.Hibernate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cache.annotation.Cacheable;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.http.*;
 import org.springframework.stereotype.Service;
@@ -66,19 +68,95 @@ public class TmdbServiceImpl implements TmdbService {
         String url = apiBaseUrl + "/search/movie?page=1&query=" + UriUtils.encode(query, StandardCharsets.UTF_8);
         return fetchMoviesFromTmdb(url);
     }
-
+    // בתוך TmdbServiceImpl
     @Override
+    @Transactional // לא readOnly
     public Movie getOrCreateMovie(String title) {
-        return movieRepository.findAllByTitle(title).stream()
+        String normalized = title == null ? "" : title.trim();
+        String cacheKey = "movie:title:" + normalized.toLowerCase();
+
+        // 1) נסה מרדיס
+        try {
+            Movie cached = (Movie) redisTemplate.opsForValue().get(cacheKey);
+            if (cached != null) {
+                logger.info("✅ Found Movie in Redis for title: {}", title);
+                return cached;
+            }
+        } catch (Exception e) {
+            logger.warn("⚠️ Redis read failed for title {}: {}", title, e.getMessage());
+        }
+
+        // 2) נסה מה־DB
+        Movie fromDb = movieRepository.findByTitleContainingIgnoreCase(normalized)
+                .stream()
                 .findFirst()
-                .orElseGet(() -> {
-                    List<Movie> movies = searchMovies(title);
-                    if (movies.isEmpty()) {
-                        throw new RuntimeException("Movie not found in TMDB: " + title);
-                    }
-                    return movieRepository.saveAndFlush(movies.get(0));
-                });
+                .orElse(null);
+
+        // 3) אם אין — חפש ב-TMDB (המתודה קיימת אצלך) ושמור ב-DB
+        if (fromDb == null) {
+            java.util.List<Movie> results = searchMovies(normalized); // קיימת אצלך
+            if (results == null || results.isEmpty()) {
+                logger.warn("❌ No results found in TMDB for title: {}", title);
+                throw new RuntimeException("Movie not found: " + title);
+            }
+            // לוקחים את הראשון (כמו שהיה לך)
+            fromDb = movieRepository.saveAndFlush(results.get(0));
+        }
+
+        // 4) ניתוק לפני קאש כדי למנוע Lazy/Proxy
+        Movie safe = detachForCache(fromDb);
+
+        // 5) כתיבה לרדיס
+        try {
+            redisTemplate.opsForValue().set(cacheKey, safe, java.time.Duration.ofHours(6));
+            logger.info("✅ Cached Movie in Redis for title: {}", title);
+        } catch (Exception e) {
+            logger.warn("⚠️ Redis write failed for title {}: {}", title, e.getMessage());
+        }
+
+        return safe;
     }
+
+    // בתוך TmdbServiceImpl
+    private Movie detachForCache(Movie m) {
+        if (m == null) return null;
+
+        // להוריד פרוקסי של Hibernate אם יש
+        Movie unproxied = (Movie) org.hibernate.Hibernate.unproxy(m);
+
+        // imageUrls הוא List<String>  -> להחליף ל-ArrayList רגיל
+        try { org.hibernate.Hibernate.initialize(unproxied.getImageUrls()); } catch (Exception ignored) {}
+        if (unproxied.getImageUrls() != null) {
+            unproxied.setImageUrls(new java.util.ArrayList<>(unproxied.getImageUrls()));
+        }
+
+        // actors הוא Set<Actor>  -> להחליף ל-LinkedHashSet רגיל (שומר סדר)
+        try { org.hibernate.Hibernate.initialize(unproxied.getActors()); } catch (Exception ignored) {}
+        if (unproxied.getActors() != null) {
+            unproxied.setActors(new java.util.LinkedHashSet<>(unproxied.getActors()));
+        }
+
+        // genres הוא Set<Genre>  -> גם ל-LinkedHashSet
+        try { org.hibernate.Hibernate.initialize(unproxied.getGenres()); } catch (Exception ignored) {}
+        if (unproxied.getGenres() != null) {
+            unproxied.setGenres(new java.util.LinkedHashSet<>(unproxied.getGenres()));
+        }
+
+        return unproxied;
+    }
+
+//    @Override
+//    public Movie getOrCreateMovie(String title) {
+//        return movieRepository.findAllByTitle(title).stream()
+//                .findFirst()
+//                .orElseGet(() -> {
+//                    List<Movie> movies = searchMovies(title);
+//                    if (movies.isEmpty()) {
+//                        throw new RuntimeException("Movie not found in TMDB: " + title);
+//                    }
+//                    return movieRepository.saveAndFlush(movies.get(0));
+//                });
+//    }
 
     //    @Override
 //    public MovieDTO getOrCreateMovieDTO(String title) {
@@ -215,7 +293,8 @@ public class TmdbServiceImpl implements TmdbService {
             if (response.getStatusCode() == HttpStatus.OK && response.getBody() != null) {
                 List<TmdbMovie> results = response.getBody().getResults();
                 if (results == null || results.isEmpty()) return Collections.emptyList();
-                return MovieDTO.TMDBmovieListToDtoList(results);
+               List <MovieDTO> movieDTOs = MovieDTO.TMDBmovieListToDtoList(results);
+                return movieDTOs;
             }
         } catch (Exception e) {
             logger.error("❌ Failed to fetch upcoming movies: {}", e.getMessage());
@@ -388,11 +467,11 @@ public class TmdbServiceImpl implements TmdbService {
         return Collections.emptyList();
     }
 
+    @Transactional
     @Override
     public Set<Genre> resolveGenres(List<Integer> genreIds) {
         if (genreIds==null||genreIds.isEmpty())
         {
-            logger.info("empty SET");
             return Collections.EMPTY_SET;
         }
         Set<Genre> genres = new HashSet<>();
@@ -405,7 +484,6 @@ public class TmdbServiceImpl implements TmdbService {
         }
         return genres;
     }
-
     @Cacheable(value = "moviesByGenreDTO", key = "#genreId + '-' + #page", unless = "#result == null or #result.isEmpty()")
     @Override
     public List<MovieDTO> getMoviesByGenreDTO(int genreId, int page) {

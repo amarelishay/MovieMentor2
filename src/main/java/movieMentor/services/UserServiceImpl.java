@@ -1,22 +1,21 @@
 package movieMentor.services;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import movieMentor.beans.Movie;
 import movieMentor.beans.User;
 import movieMentor.beans.MovieDTO;
-import movieMentor.repository.MovieDtoRepository;
+import movieMentor.beans.UserWatchEntry;
 import movieMentor.repository.UserRepository;
+import movieMentor.repository.UserWatchEntryRepository;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.cache.annotation.CacheEvict;
 import org.springframework.cache.annotation.Cacheable;
-import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -33,7 +32,9 @@ public class UserServiceImpl implements UserService {
     private final EmbeddingService embeddingService;
     private final EmbeddingStorageService embeddingStorageService;
     private final UserVectorClientService userVectorClient;
-
+    private final UserWatchEntryRepository userWatchRepo;
+    private final ObjectMapper objectMapper;
+    private final UserWatchEntryRepository userWatchEntryRepository;
     @Override
     @Transactional
     @CacheEvict(value = "userRecommendations", key = "#username")
@@ -68,26 +69,39 @@ public class UserServiceImpl implements UserService {
 
     @Override
     @Transactional
-    @CacheEvict(value = "userRecommendations", key = "#username")
+    @CacheEvict(value = {"userRecommendations", "userHistory"}, key = "#username")
     public void addToWatchHistory(String username, String movieTitle) {
         User user = fetchUser(username);
-        Movie movie = tmdbService.getOrCreateMovie(movieTitle);
-        boolean added = user.getWatchHistory().add(movie);
 
-        if (added) {
-            logger.info("🎬 Added '{}' to watch history of '{}'", movieTitle, username);
-            if (!embeddingStorageService.hasEmbedding(movie.getId())) {
-                float[] vector = embeddingService.getEmbedding(movie.getOverview());
-                embeddingStorageService.addEmbedding(movie.getId(), vector);
-            }
-            if (user.getWatchHistory().size() % 5 == 0) {
-                logger.info("📊 Triggering recommendation update — history count divisible by 5");
-                updateRecommendations(user);
-            }
+        // מביא/יוצר DTO (לא ישות)
+        MovieDTO movieDTO = tmdbService.getOrCreateMovieDTO(movieTitle);
+
+        // דה-דופליקציה: בודק אם כבר קיים אותו movieId למשתמש
+        if (!userWatchEntryRepository.existsByUserAndMovieId(user, movieDTO.getId())) {
+            UserWatchEntry entry = new UserWatchEntry();
+            entry.setUser(user);
+            entry.setId(movieDTO.getId());          // מזהה הסרט
+            entry.setMovieSnapshot(movieDTO);            // ה־DTO נשמר כ־JSON
+            entry.setWatchedAt(LocalDateTime.now());
+            userWatchEntryRepository.save(entry);
         }
-        updateUserContextInVectorDB(user);  // ← עדכון FAISS
 
+        // לוגיקת האמבדינגים (כמו קודם)
+        if (!embeddingStorageService.hasEmbedding(movieDTO.getId())) {
+            float[] vector = embeddingService.getEmbedding(movieDTO.getOverview());
+            embeddingStorageService.addEmbedding(movieDTO.getId(), vector);
+        }
+
+        // עדכון המלצות כל 5 רשומות בהיסטוריה
+        if (userWatchEntryRepository.count() % 5 == 0) {
+            updateRecommendations(user);
+        }
+
+        // עדכון ההקשר של המשתמש בווקטור-DB
+        updateUserContextInVectorDB(user);
     }
+
+
     private float[] buildUserProfileEmbeddingWeighted(User user) {
         // הגדרת המשקלים
         final float FAVORITE_WEIGHT = 2.0f;
@@ -107,12 +121,13 @@ public class UserServiceImpl implements UserService {
 
         }
 
-        // היסטוריית צפייה – רק 30 אחרונים
-        List<Movie> history = user.getWatchHistory();
-        int start = Math.max(0, history.size() - HISTORY_LIMIT);
-        List<Movie> recentHistory = history.subList(start, history.size());
 
-        for (Movie movie : recentHistory) {
+        // היסטוריית צפייה – רק 30 אחרונים
+        List<UserWatchEntry> history = user.getWatchHistory();
+        int start = Math.max(0, history.size() - HISTORY_LIMIT);
+        List<UserWatchEntry> recentHistory = history.subList(start, history.size());
+
+        for (UserWatchEntry movie : recentHistory) {
             float[] vector = embeddingStorageService.getEmbedding(movie.getId());
             if (vector != null && vector.length > 0) {
                 vectors.add(vector);
@@ -173,9 +188,19 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
-    public List<Movie> getHistory(String username) {
-        return fetchUser(username).getWatchHistory();
+    @Transactional(readOnly = true)
+    @Cacheable(cacheNames = "userHistory", key = "#username")
+    public List<MovieDTO> getHistory(String username) {
+        User user = fetchUser(username);
+        List<UserWatchEntry> entries = userWatchEntryRepository
+                .findTop100ByUserOrderByWatchedAtDesc(user);
+
+        return entries.stream()
+                .map(e -> new MovieDTO(e.getMovie()))
+                .collect(Collectors.toList());
     }
+
+
 
     @Override
     @Transactional
@@ -223,7 +248,7 @@ public class UserServiceImpl implements UserService {
 //    }
 
 
-    @Override
+@Override
 @Transactional
 @CacheEvict(cacheNames = "userRecommendations", key = "#user.username")
 public void updateRecommendations(User user) {
@@ -297,7 +322,7 @@ public void updateRecommendations(User user) {
         // ודא שכל הסרטים במועדפים/היסטוריה מכילים embedding
         List<Movie> allMovies = new ArrayList<>();
         allMovies.addAll(user.getFavoriteMovies());
-        allMovies.addAll(user.getWatchHistory());
+        allMovies.addAll(MovieDTO.DtoMovieListToMovieList(MovieDTO.userWatchToMovieDTOList(user.getWatchHistory())));
 
         for (Movie movie : allMovies) {
             if (!embeddingStorageService.hasEmbedding(movie.getId())) {

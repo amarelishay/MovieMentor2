@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import movieMentor.beans.Movie;
 import movieMentor.beans.User;
 import movieMentor.beans.MovieDTO;
+import movieMentor.beans.UserWatchEntry;
 import movieMentor.enums.TopMoviesData;
 import movieMentor.models.MovieImage;
 import movieMentor.repository.MovieRepository;
@@ -41,18 +42,27 @@ public class RecommendationService {
     private CacheManager cacheManager;
 
     public List<String> generateRecommendations(User user) {
+        // כותרות ממועדפים (עדיין ישויות Movie)
         List<String> favoriteTitles = user.getFavoriteMovies().stream()
                 .map(Movie::getTitle)
+                .filter(Objects::nonNull)
                 .collect(Collectors.toList());
 
-        List<String> historyTitles = user.getWatchHistory().stream()
-                .skip(Math.max(0, user.getWatchHistory().size() - 30))
-                .map(Movie::getTitle)
+        // כותרות מהיסטוריה (List<UserWatchEntry> -> MovieDTO -> title)
+        List<UserWatchEntry> history = user.getWatchHistory();
+        int size = history != null ? history.size() : 0;
+
+        List<String> historyTitles = (history == null ? Collections.<UserWatchEntry>emptyList() : history).stream()
+                .skip(Math.max(0, size - 30)) // אחרונים עד 30
+                .map(UserWatchEntry::getMovieSnapshot)   // -> MovieDTO
+                .filter(Objects::nonNull)
+                .map(MovieDTO::getTitle)                 // -> String
+                .filter(Objects::nonNull)
                 .collect(Collectors.toList());
 
         return openAiService.getRecommendations(favoriteTitles, historyTitles);
-
     }
+
 @PostConstruct
     public void initMovieCandidates() {
         logger.info("🚀 Starting pre-loading of movie candidates...");
